@@ -30,6 +30,7 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
     "custody_chain": ("origin", "events"),
     "collector_schedule": ("requests", "collectors"),
     "lab_revision": ("results", "sample", "analyte"),
+    "lab_duplicate_adjudication": ("readings", "blank", "collected_at", "limits"),
     "meter_balance": ("inputs", "outputs", "known_loss"),
     "leak_localization": ("signals",),
     "flush_waves": ("hydrants", "required", "max_parallel"),

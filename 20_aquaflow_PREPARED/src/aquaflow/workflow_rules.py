@@ -9,6 +9,9 @@ from .booster.failover import Unit, choose as choose_boosters
 from .chemicals.inventory import Lot, active_mass
 from .flush.plan import Hydrant, waves
 from .incidents.escalation import Incident, Rule, overdue
+from .lab.adjudication import Limits as QcLimits
+from .lab.adjudication import Reading as ReplicateReading
+from .lab.adjudication import evaluate as evaluate_replicates
 from .lab.custody import Event, validate as validate_custody
 from .lab.revisions import Result, current
 from .lab.scheduling import Collector, Req, assign
@@ -85,6 +88,14 @@ def evaluate(name: str, p: dict[str, Any]) -> dict[str, Any]:
         rows = [Result(str(x["sample"]), str(x["analyte"]), float(x["value"]), int(x["revision"]), x.get("supersedes")) for x in p["results"]]
         result = current(rows, str(p["sample"]), str(p["analyte"]))
         return {"decision": "publish", "value": result.revision, "evidence": {"value": result.value}}
+    if name == "lab_duplicate_adjudication":
+        rows = [ReplicateReading(str(x["sample"]), str(x["analyte"]), float(x["value"]), str(x["analyst"]), _dt(x["measured_at"]), str(x.get("kind", "duplicate"))) for x in p["readings"]]
+        lim = p["limits"]
+        limits = QcLimits(float(lim["max_rpd_percent"]), float(lim["blank_limit"]), float(lim["max_holding_hours"]))
+        checks = evaluate_replicates(tuple(rows), float(p["blank"]), _dt(p["collected_at"]), limits)
+        failed = sorted(c.name for c in checks if not c.passed)
+        evidence = {c.name: {"passed": c.passed, "value": c.value, "limit": c.limit} for c in checks}
+        return {"decision": "review" if failed else "accept", "value": evidence["rpd"]["value"], "evidence": {"failed": failed, "checks": evidence}}
     if name == "meter_balance":
         ins = [Meter(str(x["id"]), Decimal(str(x["opening"])), Decimal(str(x["closing"])), Decimal(str(x["multiplier"]))) for x in p["inputs"]]
         outs = [Meter(str(x["id"]), Decimal(str(x["opening"])), Decimal(str(x["closing"])), Decimal(str(x["multiplier"]))) for x in p["outputs"]]
