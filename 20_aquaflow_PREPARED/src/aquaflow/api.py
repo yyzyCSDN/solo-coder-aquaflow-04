@@ -2,9 +2,10 @@ from .treatment.chlorine_ct import compliant
 from .network.isolation import isolated
 from .meters.balance import balance
 from .leak.localize import rank
+from .lab.adjudication import AdjudicationLedger
 from .workflow_service import WorkflowService
 class AquaFlowService:
-    def __init__(self):self.workflows=WorkflowService()
+    def __init__(self):self.workflows=WorkflowService();self.lab_adjudications=AdjudicationLedger()
     def health(self):return {"service":"aquaflow","status":"ok","runtime_dependencies":0}
     def ct(self,rows,required):return compliant(rows,required)
     def isolate(self,nodes,pipes,closed,sources):return isolated(nodes,pipes,closed,sources)

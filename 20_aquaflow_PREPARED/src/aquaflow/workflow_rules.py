@@ -12,6 +12,11 @@ from .incidents.escalation import Incident, Rule, overdue
 from .lab.custody import Event, validate as validate_custody
 from .lab.revisions import Result, current
 from .lab.scheduling import Collector, Req, assign
+from .lab.adjudication import (
+    Reviewer,
+    adjudicate as adjudicate_group,
+    register_group,
+)
 from .leak.localize import Signal, rank
 from .meters.balance import Meter, balance
 from .network.isolation import Pipe, isolated
@@ -85,6 +90,83 @@ def evaluate(name: str, p: dict[str, Any]) -> dict[str, Any]:
         rows = [Result(str(x["sample"]), str(x["analyte"]), float(x["value"]), int(x["revision"]), x.get("supersedes")) for x in p["results"]]
         result = current(rows, str(p["sample"]), str(p["analyte"]))
         return {"decision": "publish", "value": result.revision, "evidence": {"value": result.value}}
+    if name == "lab_duplicate_qc":
+        group = register_group(
+            str(p["group_id"]),
+            str(p["sample"]),
+            str(p["analyte"]),
+            (float(p["original"]["value"]), _dt(p["original"]["measured_at"])),
+            [(float(x["value"]), _dt(x["measured_at"])) for x in p["retests"]],
+            _dt(p["collected_at"]),
+            float(p["blank_value"]),
+            float(p["blank_limit"]),
+            float(p["holding_time_hours"]),
+            _dt(p["analyzed_at"]) if p.get("analyzed_at") else None,
+            float(p.get("rpd_limit_percent", 20.0)),
+        )
+        return {
+            "decision": "review" if group.failed_checks else "pass",
+            "value": group.state,
+            "evidence": {
+                "group_id": group.group_id,
+                "failed_checks": list(group.failed_checks),
+                "rpd_pairs": [
+                    {"reading_id": q.reading_id, "rpd_percent": q.rpd_percent}
+                    for q in group.rpd_pairs
+                ],
+                "blank_passed": group.blank.passed,
+                "holding_passed": group.holding.passed,
+                "elapsed_hours": group.holding.elapsed_hours,
+            },
+        }
+    if name == "lab_duplicate_adjudication":
+        g = p["group"]
+        group = register_group(
+            str(g["group_id"]),
+            str(g["sample"]),
+            str(g["analyte"]),
+            (float(g["original"]["value"]), _dt(g["original"]["measured_at"])),
+            [(float(x["value"]), _dt(x["measured_at"])) for x in g["retests"]],
+            _dt(g["collected_at"]),
+            float(g["blank_value"]),
+            float(g["blank_limit"]),
+            float(g["holding_time_hours"]),
+            _dt(g["analyzed_at"]) if g.get("analyzed_at") else None,
+            float(g.get("rpd_limit_percent", 20.0)),
+        )
+        rv = p["reviewer"]
+        reviewer = Reviewer(
+            str(rv["name"]),
+            str(rv["role"]),
+            frozenset(str(x) for x in rv.get("qualified_analytes", ())),
+        )
+        published = bool(p.get("published", False))
+        current_revision = int(p["published_revision"]) if p.get("published_revision") else (1 if published else None)
+        outcome = adjudicate_group(
+            group,
+            reviewer,
+            str(p["decision"]),
+            str(p.get("reason", "")),
+            replacement_reading_id=p.get("replacement_reading_id"),
+            acknowledge_published=bool(p.get("acknowledge_published", False)),
+            published=published,
+            next_revision=(current_revision + 1) if current_revision else 1,
+            current_revision=current_revision,
+        )
+        return {
+            "decision": outcome.decision,
+            "value": outcome.selected.value if outcome.selected else None,
+            "evidence": {
+                "group_id": outcome.group_id,
+                "reviewer": outcome.reviewer,
+                "reason": outcome.reason,
+                "failed_checks": list(outcome.failed_checks),
+                "republish_required": outcome.selected.republish_required
+                if outcome.selected
+                else False,
+                "selected_revision": outcome.selected.revision if outcome.selected else None,
+            },
+        }
     if name == "meter_balance":
         ins = [Meter(str(x["id"]), Decimal(str(x["opening"])), Decimal(str(x["closing"])), Decimal(str(x["multiplier"]))) for x in p["inputs"]]
         outs = [Meter(str(x["id"]), Decimal(str(x["opening"])), Decimal(str(x["closing"])), Decimal(str(x["multiplier"]))) for x in p["outputs"]]
